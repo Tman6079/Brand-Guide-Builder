@@ -74,6 +74,54 @@ const WEB_FETCH_BETA = "web-fetch-2025-09-10";
 /** Timeout for a single web fetch API call (ms). */
 const WEB_FETCH_TIMEOUT_MS = 120_000;
 
+/** Max length of visible text sent to Claude (reduces tokens, improves reliability). */
+const EXTRACTION_TEXT_MAX_LENGTH = 80_000;
+
+/**
+ * Converts HTML to visible plain text for extraction: strips script/style/comments,
+ * preserves headings/paragraph breaks, collapses whitespace, and caps length.
+ * No heavy dependencies; regex and string only.
+ */
+function htmlToVisibleText(html: string, maxLength = EXTRACTION_TEXT_MAX_LENGTH): string {
+  let s = html;
+
+  // Remove <script>...</script> and <style>...</style> (including with attributes)
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+  s = s.replace(/<!--[\s\S]*?-->/g, "");
+
+  // Block elements → newline (preserve structure)
+  const blockTags = /<\/?(?:h[1-6]|p|div|br|li|tr|th|td|hr|ul|ol|section|article|header|footer|nav|main|aside|blockquote|pre)(?:\s[^>]*)?\/?>/gi;
+  s = s.replace(blockTags, "\n");
+
+  // All remaining tags stripped
+  s = s.replace(/<[^>]+>/g, " ");
+
+  // Decode common HTML entities
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)));
+
+  // Collapse whitespace: multiple spaces/newlines → single newline, trim lines
+  s = s
+    .split(/\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n\n");
+  s = s.replace(/\n{3,}/g, "\n\n").trim();
+
+  if (s.length > maxLength) {
+    s = s.slice(0, maxLength) + "\n[... truncated for length ...]";
+  }
+  return s;
+}
+
 const WEB_FETCH_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
 
 Use web_fetch only for this exact URL. Do not fetch any other URLs.
@@ -166,8 +214,11 @@ export async function extractBrandIntelligenceFromUrl(
   }
 
   const html = await fetchPageContent(homepageUrl);
-
-  const userContent = `Homepage URL: ${homepageUrl}\n\nPage content (HTML) to analyze:\n\n${html}`;
+  const visibleText = htmlToVisibleText(html);
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/619a2aaf-4d05-4e48-a482-ad27c306e60f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/extract-brand-intelligence.ts:FromUrl:visibleText',message:'Server-side path: visible text length',data:{htmlLen:html.length,visibleTextLen:visibleText.length,capped:visibleText.length<=EXTRACTION_TEXT_MAX_LENGTH},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+  // #endregion
+  const userContent = `Homepage URL: ${homepageUrl}\n\nPage content (visible text) to analyze:\n\n${visibleText}`;
 
   const client = new Anthropic({ apiKey });
   const model = process.env.ANTHROPIC_EXTRACTION_MODEL ?? "claude-sonnet-4-20250514";
@@ -239,6 +290,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export async function extractBrandIntelligenceFromUrlViaWebFetch(
   url: string
 ): Promise<BrandIntelligence> {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/619a2aaf-4d05-4e48-a482-ad27c306e60f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/extract-brand-intelligence.ts:ViaWebFetch:entry',message:'ViaWebFetch entered',data:{url},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey?.trim()) {
     throw new Error("ANTHROPIC_API_KEY is not set");
@@ -293,8 +347,15 @@ export async function extractBrandIntelligenceFromUrlViaWebFetch(
       }
       return normalizeBrandIntelligence(raw as Partial<BrandIntelligence> & Record<string, unknown>);
     } catch (err) {
+      // #region agent log
+      const errMsg = err instanceof Error ? err.message : String(err);
+      fetch('http://127.0.0.1:7242/ingest/619a2aaf-4d05-4e48-a482-ad27c306e60f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/extract-brand-intelligence.ts:ViaWebFetch:catch',message:'doWebFetchCall threw',data:{attempt,errMsg,promptTooLong:errMsg.includes('prompt is too long')},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+      // #endregion
       lastErr = err;
       if (attempt === 1) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/619a2aaf-4d05-4e48-a482-ad27c306e60f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/extract-brand-intelligence.ts:ViaWebFetch:fallback',message:'Falling back to FromUrl',data:{url},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
         return extractBrandIntelligenceFromUrl(url);
       }
     }
