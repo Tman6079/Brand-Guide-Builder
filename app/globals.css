@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .prose h2,
+  .prose h3 {
+    font-weight: 700;
+  }
+}
