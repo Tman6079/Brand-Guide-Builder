@@ -1,0 +1,3 @@
+{"location":"app/api/brand-guide/route.ts:primary","message":"Trying FromUrl first (capped visible text)","data":{"url":"https://mavconstructionandroofing.com/"},"timestamp":1770681146009,"runId":"post-fix"}
+{"location":"lib/extract-brand-intelligence.ts:FromUrl:visibleText","message":"Server-side path: visible text length","data":{"htmlLen":601182,"visibleTextLen":4299,"capped":true},"timestamp":1770681146462,"hypothesisId":"H3"}
+{"location":"lib/extract-brand-intelligence.ts:FromUrl:visibleText","message":"Server-side path: visible text length","data":{"htmlLen":285057,"visibleTextLen":8524,"capped":true},"timestamp":1770742907212,"hypothesisId":"H3"}

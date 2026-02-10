@@ -3,16 +3,40 @@
 import { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { BrandProfile } from "@/types/brand-profile";
 import SnakeGame from "./components/SnakeGame";
 
 type State = "idle" | "loading" | "success" | "error";
+
+const PROFILE_LABELS: Record<keyof BrandProfile, string> = {
+  company_name: "Company name",
+  type_of_business: "Type of business",
+  website: "Website",
+  company_email: "Company email",
+  company_address: "Company address",
+  phone_number: "Phone number",
+  business_hours: "Business hours",
+  tone_of_voice: "Tone of voice",
+  target_audience: "Target audience",
+  customer_pain_points: "Customer pain points",
+  brand_promise: "Brand promise",
+  brand_values: "Brand values",
+  what_does_your_brand_do: "What does your brand do",
+  what_makes_you_better_than_competitors: "What makes you better than competitors",
+  unique_selling_proposition: "Unique selling proposition",
+  risks_of_inaction: "Risks of inaction",
+  call_to_action: "Call to action",
+};
 
 export default function Home() {
   const [url, setUrl] = useState("");
   const [state, setState] = useState<State>("idle");
   const [markdown, setMarkdown] = useState<string | null>(null);
+  const [profile, setProfile] = useState<BrandProfile | null>(null);
+  const [errors, setErrors] = useState<{ guide?: string; profile?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [profileRetrying, setProfileRetrying] = useState(false);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -22,6 +46,8 @@ export default function Home() {
       setState("loading");
       setError(null);
       setMarkdown(null);
+      setProfile(null);
+      setErrors(null);
       try {
         const res = await fetch("/api/brand-guide", {
           method: "POST",
@@ -34,7 +60,9 @@ export default function Home() {
           setState("error");
           return;
         }
-        setMarkdown(data.markdown ?? "");
+        setMarkdown(data.markdown ?? null);
+        setProfile(data.profile ?? null);
+        setErrors(data.errors ?? null);
         setState("success");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Network error");
@@ -43,6 +71,30 @@ export default function Home() {
     },
     [url]
   );
+
+  const handleRetryProfile = useCallback(async () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    setProfileRetrying(true);
+    try {
+      const res = await fetch("/api/brand-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrors((prev) => ({ ...prev, profile: data?.error ?? "Request failed" }));
+        return;
+      }
+      setProfile(data.profile ?? null);
+      setErrors((prev) => (prev ? { ...prev, profile: undefined } : null));
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, profile: err instanceof Error ? err.message : "Unknown error" }));
+    } finally {
+      setProfileRetrying(false);
+    }
+  }, [url]);
 
   const handleCopy = useCallback(async () => {
     if (!markdown) return;
@@ -54,6 +106,9 @@ export default function Home() {
       setError("Copy failed");
     }
   }, [markdown]);
+
+  const profileLoading = state === "loading" || profileRetrying;
+  const profileFailed = errors?.profile != null && errors.profile !== "";
 
   return (
     <main className="space-y-8">
@@ -82,14 +137,61 @@ export default function Home() {
       </form>
 
       {state === "loading" && (
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="mb-4 text-center text-sm text-slate-600">
-            Building your brand guide… play while you wait
-          </p>
-          <div className="flex justify-center">
-            <SnakeGame />
-          </div>
-        </section>
+        <>
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="mb-4 text-center text-sm text-slate-600">
+              Building your brand guide… play while you wait
+            </p>
+            <div className="flex justify-center">
+              <SnakeGame />
+            </div>
+          </section>
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-sm font-semibold text-slate-700">Brand Profile</h2>
+            <p className="text-sm text-slate-500">Generating brand profile…</p>
+          </section>
+        </>
+      )}
+
+      {state === "success" && (
+        <>
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-sm font-semibold text-slate-700">Brand Profile</h2>
+            {profileRetrying && (
+              <p className="text-sm text-slate-500">Generating brand profile…</p>
+            )}
+            {profileFailed && !profileLoading && (
+              <div className="space-y-2">
+                <p className="text-sm text-red-600">{errors.profile}</p>
+                <button
+                  type="button"
+                  onClick={handleRetryProfile}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Retry profile
+                </button>
+              </div>
+            )}
+            {profile != null && !profileLoading && (
+              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                {(Object.keys(PROFILE_LABELS) as (keyof BrandProfile)[]).map((key) => (
+                  <div key={key} className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      {PROFILE_LABELS[key]}
+                    </dt>
+                    <dd className="mt-0.5 text-sm text-slate-800">
+                      {profile[key] === "Not Provided" ? (
+                        <span className="text-slate-400">Not Provided</span>
+                      ) : (
+                        profile[key]
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
       )}
 
       {state === "error" && error && (
